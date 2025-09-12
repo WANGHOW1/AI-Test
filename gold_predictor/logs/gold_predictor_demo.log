@@ -1,0 +1,31 @@
+2025-09-10 13:54:14,367 - __main__ - INFO - Starting Gold Price Predictor - DEMO MODE
+2025-09-10 13:54:17,052 - gui.main_window - INFO - Data aggregator initialized
+2025-09-10 13:54:17,053 - gui.main_window - INFO - Previous data collection still running, skipping...
+2025-09-10 13:54:17,054 - __main__ - INFO - Demo application started successfully
+2025-09-10 13:54:19,568 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:54:20,689 - src.data.collectors - ERROR - Fallback gold price fetch failed: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:54:23,826 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:54:26,946 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:54:26,949 - gui.main_window - INFO - Adjusted update interval to 3 minutes
+2025-09-10 13:54:26,950 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:57:17,650 - __main__ - INFO - Starting Gold Price Predictor - DEMO MODE
+2025-09-10 13:57:19,786 - gui.main_window - INFO - Data aggregator initialized
+2025-09-10 13:57:19,787 - gui.main_window - INFO - Adjusted update interval to 3 minutes
+2025-09-10 13:57:19,787 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:57:19,787 - __main__ - INFO - Demo application started with mock data
+2025-09-10 13:57:23,521 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:57:24,687 - src.data.collectors - ERROR - Fallback gold price fetch failed: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:57:26,972 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:57:27,818 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:57:30,982 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:57:30,988 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:00:19,795 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:00:26,990 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:03:19,798 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:03:26,998 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:06:19,798 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:06:27,018 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:09:19,794 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:09:27,009 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:12:19,787 - gui.main_window - INFO - UI updated successfully
+2025-09-10 14:12:27,007 - gui.main_window - INFO - UI updated successfully

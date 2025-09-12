@@ -1,0 +1,26 @@
+2025-09-10 13:42:20,733 - __main__ - INFO - Starting Gold Price Predictor
+2025-09-10 13:42:23,494 - gui.main_window - INFO - Data aggregator initialized
+2025-09-10 13:42:26,138 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:42:26,244 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:42:26,372 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:42:26,373 - src.data.collectors - WARNING - No News API key provided
+2025-09-10 13:42:26,387 - gui.main_window - INFO - Adjusted update interval to 3 minutes
+2025-09-10 13:42:26,388 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:45:26,885 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:45:26,985 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:45:27,102 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:45:27,103 - src.data.collectors - WARNING - No News API key provided
+2025-09-10 13:45:27,106 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:48:26,643 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:48:26,860 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:48:26,957 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:48:26,958 - src.data.collectors - WARNING - No News API key provided
+2025-09-10 13:48:26,960 - gui.main_window - INFO - UI updated successfully
+2025-09-10 13:51:22,501 - __main__ - INFO - Starting Gold Price Predictor
+2025-09-10 13:51:24,706 - gui.main_window - INFO - Data aggregator initialized
+2025-09-10 13:51:26,064 - src.data.collectors - ERROR - Error fetching gold price: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:51:26,187 - src.data.collectors - ERROR - Error fetching USD strength: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:51:26,300 - src.data.collectors - ERROR - Error fetching interest rates: Too Many Requests. Rate limited. Try after a while.
+2025-09-10 13:51:26,301 - src.data.collectors - WARNING - No News API key provided
+2025-09-10 13:51:26,305 - gui.main_window - INFO - Adjusted update interval to 3 minutes
+2025-09-10 13:51:26,305 - gui.main_window - INFO - UI updated successfully

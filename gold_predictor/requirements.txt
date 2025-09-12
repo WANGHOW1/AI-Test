@@ -1,0 +1,23 @@
+# GUI Framework
+PyQt5>=5.15.0
+
+# Data Collection & Processing
+requests>=2.25.0
+pytz>=2021.1
+
+# API Integration
+# Main API: Tanshu Gold API (Shanghai Gold Exchange)
+# Exchange Rate API: exchangerate-api.com (free tier)
+
+# Machine Learning
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.5.0
+
+# Utilities
+python-dateutil>=2.8.0
+pytz>=2021.1
+
+# Configuration
+python-dotenv>=0.19.0
