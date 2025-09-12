@@ -10,7 +10,8 @@ from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QHBoxLayout, QLabel, QTextEdit, QPushButton, 
                            QTabWidget, QStatusBar, QGroupBox, QGridLayout,
-                           QProgressBar, QSplitter, QTableWidget, QTableWidgetItem)
+                           QProgressBar, QSplitter, QTableWidget, QTableWidgetItem,
+                           QScrollArea)
 from PyQt5.QtCore import QTimer, QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QPalette, QColor
 import json
@@ -41,6 +42,12 @@ class GoldDataWorker(QThread):
             # Get schedule info
             schedule = self.predictor.get_trading_schedule_info()
             
+            # Get market factors including DXY
+            market_factors = self.predictor.get_market_factors()
+            
+            # Get prediction signals
+            prediction_signals = self.predictor.get_prediction_signals()
+            
             result = {
                 'current_price_usd': usd_price,
                 'current_london_data': london_data,
@@ -48,6 +55,8 @@ class GoldDataWorker(QThread):
                 'market_info': market_info,
                 'schedule': schedule,
                 'exchange_rate': self.predictor.usd_gbp_rate,
+                'market_factors': market_factors,
+                'prediction_signals': prediction_signals,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
             
@@ -252,7 +261,167 @@ class GoldPredictorGUI(QMainWindow):
         
         tab_widget.addTab(market_tab, "💰 Market Data")
         
-        # Tab 2: API Information
+        # Tab 2: Market Factors & Prediction
+        factors_tab = QWidget()
+        factors_layout = QVBoxLayout(factors_tab)
+        
+        # Create a scroll area for the factors
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # Market Factors Grid Layout (2x3 grid for 5 factors + correlation)
+        factors_grid_layout = QGridLayout()
+        
+        # DXY Section
+        dxy_group = QGroupBox("📊 USD Index (DXY)")
+        dxy_layout = QGridLayout(dxy_group)
+        
+        self.dxy_price_label = QLabel("Loading...")
+        self.dxy_price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        self.dxy_change_label = QLabel("Loading...")
+        self.dxy_change_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.dxy_timestamp_label = QLabel("Last Updated: Loading...")
+        self.dxy_timestamp_label.setStyleSheet("color: #87CEEB; font-size: 9px;")
+        
+        dxy_layout.addWidget(QLabel("Price:"), 0, 0)
+        dxy_layout.addWidget(self.dxy_price_label, 0, 1)
+        dxy_layout.addWidget(QLabel("Change:"), 1, 0)
+        dxy_layout.addWidget(self.dxy_change_label, 1, 1)
+        dxy_layout.addWidget(self.dxy_timestamp_label, 2, 0, 1, 2)
+        
+        # US 10Y Treasury Section
+        us10y_group = QGroupBox("📈 10-Year Treasury")
+        us10y_layout = QGridLayout(us10y_group)
+        
+        self.us10y_price_label = QLabel("Loading...")
+        self.us10y_price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        self.us10y_change_label = QLabel("Loading...")
+        self.us10y_change_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.us10y_timestamp_label = QLabel("Last Updated: Loading...")
+        self.us10y_timestamp_label.setStyleSheet("color: #87CEEB; font-size: 9px;")
+        
+        us10y_layout.addWidget(QLabel("Yield:"), 0, 0)
+        us10y_layout.addWidget(self.us10y_price_label, 0, 1)
+        us10y_layout.addWidget(QLabel("Change:"), 1, 0)
+        us10y_layout.addWidget(self.us10y_change_label, 1, 1)
+        us10y_layout.addWidget(self.us10y_timestamp_label, 2, 0, 1, 2)
+        
+        # TIPS Section
+        tips_group = QGroupBox("📉 10-Year TIPS")
+        tips_layout = QGridLayout(tips_group)
+        
+        self.tips_price_label = QLabel("Loading...")
+        self.tips_price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        self.tips_change_label = QLabel("Loading...")
+        self.tips_change_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.tips_timestamp_label = QLabel("Last Updated: Loading...")
+        self.tips_timestamp_label.setStyleSheet("color: #87CEEB; font-size: 9px;")
+        
+        tips_layout.addWidget(QLabel("Yield:"), 0, 0)
+        tips_layout.addWidget(self.tips_price_label, 0, 1)
+        tips_layout.addWidget(QLabel("Change:"), 1, 0)
+        tips_layout.addWidget(self.tips_change_label, 1, 1)
+        tips_layout.addWidget(self.tips_timestamp_label, 2, 0, 1, 2)
+        
+        # VIX Section
+        vix_group = QGroupBox("📊 Volatility Index (VIX)")
+        vix_layout = QGridLayout(vix_group)
+        
+        self.vix_price_label = QLabel("Loading...")
+        self.vix_price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        self.vix_change_label = QLabel("Loading...")
+        self.vix_change_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.vix_timestamp_label = QLabel("Last Updated: Loading...")
+        self.vix_timestamp_label.setStyleSheet("color: #87CEEB; font-size: 9px;")
+        
+        vix_layout.addWidget(QLabel("Index:"), 0, 0)
+        vix_layout.addWidget(self.vix_price_label, 0, 1)
+        vix_layout.addWidget(QLabel("Change:"), 1, 0)
+        vix_layout.addWidget(self.vix_change_label, 1, 1)
+        vix_layout.addWidget(self.vix_timestamp_label, 2, 0, 1, 2)
+        
+        # GLD Section
+        gld_group = QGroupBox("🥇 Gold ETF (GLD)")
+        gld_layout = QGridLayout(gld_group)
+        
+        self.gld_price_label = QLabel("Loading...")
+        self.gld_price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFD700;")
+        self.gld_change_label = QLabel("Loading...")
+        self.gld_change_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.gld_timestamp_label = QLabel("Last Updated: Loading...")
+        self.gld_timestamp_label.setStyleSheet("color: #87CEEB; font-size: 9px;")
+        
+        gld_layout.addWidget(QLabel("Price:"), 0, 0)
+        gld_layout.addWidget(self.gld_price_label, 0, 1)
+        gld_layout.addWidget(QLabel("Change:"), 1, 0)
+        gld_layout.addWidget(self.gld_change_label, 1, 1)
+        gld_layout.addWidget(self.gld_timestamp_label, 2, 0, 1, 2)
+        
+        # Multi-Factor Correlation Analysis
+        correlation_group = QGroupBox("🔗 Multi-Factor Analysis")
+        correlation_layout = QGridLayout(correlation_group)
+        
+        self.correlation_status_label = QLabel("Analyzing...")
+        self.correlation_status_label.setStyleSheet("font-weight: bold; color: #98FB98;")
+        self.correlation_strength_label = QLabel("Market Score: Loading...")
+        self.correlation_strength_label.setStyleSheet("color: #FFB6C1; font-size: 11px;")
+        self.gold_change_label = QLabel("Factors Tracked: 0")
+        self.gold_change_label.setStyleSheet("color: #DDA0DD;")
+        self.usd_change_label = QLabel("Confidence: 0%")
+        self.usd_change_label.setStyleSheet("color: #87CEEB;")
+        
+        correlation_layout.addWidget(QLabel("Status:"), 0, 0)
+        correlation_layout.addWidget(self.correlation_status_label, 0, 1)
+        correlation_layout.addWidget(self.correlation_strength_label, 1, 0, 1, 2)
+        correlation_layout.addWidget(self.gold_change_label, 2, 0)
+        correlation_layout.addWidget(self.usd_change_label, 2, 1)
+        
+        # Arrange factors in 3x2 grid
+        factors_grid_layout.addWidget(dxy_group, 0, 0)
+        factors_grid_layout.addWidget(us10y_group, 0, 1)
+        factors_grid_layout.addWidget(tips_group, 0, 2)
+        factors_grid_layout.addWidget(vix_group, 1, 0)
+        factors_grid_layout.addWidget(gld_group, 1, 1)
+        factors_grid_layout.addWidget(correlation_group, 1, 2)
+        
+        scroll_layout.addLayout(factors_grid_layout)
+        
+        # Compact AI Prediction Section
+        prediction_group = QGroupBox("🤖 AI Prediction")
+        prediction_layout = QVBoxLayout(prediction_group)
+        prediction_group.setMaximumHeight(200)  # Make it smaller
+        
+        # Compact recommendation display
+        recommendation_layout = QHBoxLayout()
+        self.recommendation_label = QLabel("HOLD")
+        self.recommendation_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFD700; padding: 8px; border: 2px solid #666; border-radius: 5px;")
+        self.confidence_label = QLabel("Confidence: 0%")
+        self.confidence_label.setStyleSheet("font-size: 12px; color: #87CEEB;")
+        
+        recommendation_layout.addWidget(QLabel("Rec:"))
+        recommendation_layout.addWidget(self.recommendation_label)
+        recommendation_layout.addWidget(self.confidence_label)
+        recommendation_layout.addStretch()
+        
+        prediction_layout.addLayout(recommendation_layout)
+        
+        # Compact signals list
+        self.signals_text = QTextEdit()
+        self.signals_text.setMaximumHeight(100)  # Smaller height
+        self.signals_text.setStyleSheet("background-color: #404040; color: #ffffff; border: 1px solid #666; font-size: 10px;")
+        prediction_layout.addWidget(QLabel("Active Signals:"))
+        prediction_layout.addWidget(self.signals_text)
+        
+        scroll_layout.addWidget(prediction_group)
+        
+        scroll_area.setWidget(scroll_widget)
+        scroll_area.setWidgetResizable(True)
+        factors_layout.addWidget(scroll_area)
+        
+        tab_widget.addTab(factors_tab, "🎯 Market Factors")
+        
+        # Tab 3: API Information
         api_tab = QWidget()
         api_layout = QVBoxLayout(api_tab)
         
@@ -287,7 +456,7 @@ class GoldPredictorGUI(QMainWindow):
         self.error_code_label.setStyleSheet("color: #DDA0DD; font-weight: bold;")
         
         self.error_description_label = QLabel("Description: All systems operational")
-        self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal; word-wrap: true;")
+        self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal;")
         self.error_description_label.setWordWrap(True)
         
         error_layout.addWidget(self.error_status_label)
@@ -401,17 +570,20 @@ class GoldPredictorGUI(QMainWindow):
                 self.error_status_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
                 self.error_code_label.setText(f"Error Code: {error_info['error_code']}")
                 self.error_description_label.setText(f"Description: {error_info['description']}")
-                self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal; word-wrap: true;")
+                self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal;")
             else:
                 self.error_status_label.setText("✅ No errors detected")
                 self.error_status_label.setStyleSheet("color: #90EE90; font-weight: bold;")
                 self.error_code_label.setText("Error Code: None")
                 self.error_description_label.setText("Description: All systems operational")
-                self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal; word-wrap: true;")
+                self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal;")
             
             # Update raw response
             raw_response = self.predictor.get_raw_api_response()
             self.raw_response_text.setPlainText(json.dumps(raw_response, indent=2, ensure_ascii=False))
+            
+            # Update market factors (DXY and prediction)
+            self.update_market_factors(data)
             
             self.status_bar.showMessage(f"✅ Updated successfully at {data['timestamp']}")
             
@@ -473,6 +645,256 @@ class GoldPredictorGUI(QMainWindow):
         # Adjust column widths
         self.products_table.resizeColumnsToContents()
     
+    def update_market_factors(self, data):
+        """Update all market factors display with individual sections"""
+        try:
+            market_factors = data.get('market_factors', {})
+            prediction_signals = data.get('prediction_signals', {})
+            
+            # Check for enhanced financial data
+            enhanced_data = market_factors.get('financial_instruments', {})
+            
+            if enhanced_data:
+                # Enhanced multi-factor display mode - populate individual factor sections
+                from datetime import datetime as dt
+                
+                # Update each factor section individually
+                for symbol, factor_data in enhanced_data.items():
+                    name = factor_data.get('name', symbol)
+                    price = factor_data.get('price', 'N/A')  # Use 'price' not 'current_price'
+                    change = factor_data.get('change_percent', '0%')
+                    
+                    # Determine color based on change direction (red for positive, green for negative)
+                    if isinstance(change, str) and change != '0%':
+                        if change.startswith('+'):
+                            change_color = "#FF6B6B"  # Red for positive
+                        elif change.startswith('-'):
+                            change_color = "#00FF00"  # Green for negative
+                        else:
+                            change_color = "#FFD700"  # Gold for neutral
+                    else:
+                        change_color = "#FFD700"
+                    
+                    timestamp_text = f"Updated: {dt.now().strftime('%H:%M:%S')}"
+                    
+                    # Update specific factor labels based on symbol
+                    if symbol == 'DXY':
+                        self.dxy_price_label.setText(str(price))
+                        self.dxy_change_label.setText(str(change))
+                        self.dxy_change_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {change_color};")
+                        self.dxy_timestamp_label.setText(timestamp_text)
+                        
+                    elif symbol == 'US10Y':
+                        self.us10y_price_label.setText(f"{price}%")
+                        self.us10y_change_label.setText(str(change))
+                        self.us10y_change_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {change_color};")
+                        self.us10y_timestamp_label.setText(timestamp_text)
+                        
+                    elif symbol == 'TIPS':
+                        self.tips_price_label.setText(f"{price}%")
+                        self.tips_change_label.setText(str(change))
+                        self.tips_change_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {change_color};")
+                        self.tips_timestamp_label.setText(timestamp_text)
+                        
+                    elif symbol == 'VIX':
+                        self.vix_price_label.setText(str(price))
+                        self.vix_change_label.setText(str(change))
+                        self.vix_change_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {change_color};")
+                        self.vix_timestamp_label.setText(timestamp_text)
+                        
+                    elif symbol == 'GLD':
+                        self.gld_price_label.setText(f"${price}")
+                        self.gld_change_label.setText(str(change))
+                        self.gld_change_label.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {change_color};")
+                        self.gld_timestamp_label.setText(timestamp_text)
+                
+                # Update multi-factor correlation analysis
+                market_impact = market_factors.get('market_impact', {})
+                overall_score = market_impact.get('overall_score', 0)
+                confidence = market_impact.get('confidence', 0)
+                recommendation = market_impact.get('recommendation', 'NEUTRAL')
+                
+                if recommendation == 'BUY':
+                    self.correlation_status_label.setText("📈 BULLISH SIGNAL")
+                    self.correlation_status_label.setStyleSheet("font-weight: bold; color: #00FF00;")
+                elif recommendation == 'SELL':
+                    self.correlation_status_label.setText("📉 BEARISH SIGNAL")
+                    self.correlation_status_label.setStyleSheet("font-weight: bold; color: #FF6B6B;")
+                else:
+                    self.correlation_status_label.setText("➡️ NEUTRAL")
+                    self.correlation_status_label.setStyleSheet("font-weight: bold; color: #FFD700;")
+                
+                self.correlation_strength_label.setText(f"Market Score: {overall_score:.2f}")
+                self.gold_change_label.setText(f"Factors Tracked: {len(enhanced_data)}")
+                self.usd_change_label.setText(f"Analysis Confidence: {confidence}%")
+                
+                # Color code confidence
+                if confidence >= 70:
+                    conf_color = "#00FF00"
+                elif confidence >= 40:
+                    conf_color = "#FFD700"
+                else:
+                    conf_color = "#FF6B6B"
+                self.usd_change_label.setStyleSheet(f"color: {conf_color};")
+                
+            else:
+                # Legacy DXY-only display mode
+                dxy_price = market_factors.get('dxy_price', 0)
+                dxy_change_pct = market_factors.get('dxy_change_percent', '0%')
+                dxy_timestamp = market_factors.get('dxy_timestamp', 'N/A')
+                
+                if dxy_price > 0:
+                    self.dxy_price_label.setText(f"{dxy_price:.3f}")
+                    
+                    # Color code DXY change (using requested color scheme)
+                    if '+' in dxy_change_pct:
+                        self.dxy_change_label.setText(f"{dxy_change_pct}")
+                        self.dxy_change_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #FF6B6B;")  # Red for positive
+                    elif '-' in dxy_change_pct:
+                        self.dxy_change_label.setText(f"{dxy_change_pct}")
+                        self.dxy_change_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #00FF00;")  # Green for negative
+                    else:
+                        self.dxy_change_label.setText(f"{dxy_change_pct}")
+                        self.dxy_change_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #FFD700;")
+                    
+                    # Format timestamp
+                    if dxy_timestamp != 'N/A':
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(dxy_timestamp.replace('Z', '+00:00'))
+                            formatted_time = dt.strftime('%H:%M:%S')
+                            self.dxy_timestamp_label.setText(f"Updated: {formatted_time}")
+                        except:
+                            self.dxy_timestamp_label.setText(f"Updated: {dxy_timestamp[:19]}")
+                    else:
+                        self.dxy_timestamp_label.setText("Updated: N/A")
+                else:
+                    self.dxy_price_label.setText("Unavailable")
+                    self.dxy_change_label.setText("N/A")
+                    self.dxy_timestamp_label.setText("Updated: Error")
+                
+                # Set other factors to loading state in legacy mode
+                for prefix in ['us10y', 'tips', 'vix', 'gld']:
+                    getattr(self, f'{prefix}_price_label').setText("Unavailable")
+                    getattr(self, f'{prefix}_change_label').setText("N/A")
+                    getattr(self, f'{prefix}_timestamp_label').setText("Legacy Mode")
+                
+                # Legacy correlation analysis
+                correlation = market_factors.get('correlation_signal')
+                if correlation:
+                    if correlation['inverse_relationship']:
+                        self.correlation_status_label.setText("✅ Normal Inverse")
+                        self.correlation_status_label.setStyleSheet("font-weight: bold; color: #00FF00;")
+                    else:
+                        self.correlation_status_label.setText("⚠️ Unusual Pattern")
+                        self.correlation_status_label.setStyleSheet("font-weight: bold; color: #FFB6C1;")
+                    
+                    strength = correlation['strength']
+                    self.correlation_strength_label.setText(f"Strength: {strength:.3f}")
+                    
+                    gold_change = correlation['gold_change_pct']
+                    dxy_change = correlation['dxy_change_pct']
+                    
+                    # Using requested color scheme
+                    gold_color = "#FF6B6B" if gold_change > 0 else "#00FF00"
+                    dxy_color = "#FF6B6B" if dxy_change > 0 else "#00FF00"
+                    
+                    self.gold_change_label.setText(f"Gold Change: {gold_change:+.2f}%")
+                    self.gold_change_label.setStyleSheet(f"color: {gold_color};")
+                    
+                    self.usd_change_label.setText(f"USD Change: {dxy_change:+.2f}%")
+                    self.usd_change_label.setStyleSheet(f"color: {dxy_color};")
+                else:
+                    self.correlation_status_label.setText("Analyzing...")
+                    self.correlation_strength_label.setText("Strength: Calculating...")
+                    self.gold_change_label.setText("Gold Change: Loading...")
+                    self.usd_change_label.setText("USD Change: Loading...")
+
+            # Update prediction signals (common for both modes)
+            recommendation = prediction_signals.get('recommendation', 'HOLD')
+            confidence = prediction_signals.get('confidence', 0)
+            signals = prediction_signals.get('signals', [])
+            
+            # Color code recommendation
+            if recommendation == 'BUY':
+                rec_color = "#00FF00"  # Green
+                rec_bg = "background-color: #2d5a2d;"
+            elif recommendation == 'SELL':
+                rec_color = "#FF6B6B"  # Red
+                rec_bg = "background-color: #5a2d2d;"
+            else:  # HOLD
+                rec_color = "#FFD700"  # Gold
+                rec_bg = "background-color: #5a5a2d;"
+            
+            self.recommendation_label.setText(recommendation)
+            self.recommendation_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {rec_color}; padding: 8px; border: 2px solid #666; border-radius: 5px; {rec_bg}")
+            
+            # Only show confidence in AI prediction section (remove duplicate)
+            if confidence >= 50:
+                conf_color = "#00FF00"  # High confidence - green
+            elif confidence >= 25:
+                conf_color = "#FFD700"  # Medium confidence - yellow
+            else:
+                conf_color = "#FF6B6B"  # Low confidence - red
+            
+            self.confidence_label.setText(f"Confidence: {confidence}%")
+            self.confidence_label.setStyleSheet(f"font-size: 12px; color: {conf_color};")
+            
+            # Enhanced signals text with factor analysis
+            signals_list = []
+            
+            # Add main signals
+            if signals:
+                signals_list.extend([f"• {signal}" for signal in signals])
+            
+            # Add factor analysis if available
+            factor_analysis = prediction_signals.get('factor_analysis', {})
+            if factor_analysis:
+                signals_list.append("\n🔍 Factor Impact:")
+                for symbol, analysis in factor_analysis.items():
+                    impact = analysis['impact_on_gold']
+                    significance = analysis['significance']
+                    change_pct = analysis['change_percent']
+                    
+                    # Use emoji based on impact
+                    if impact == 'bullish':
+                        emoji = "📈"
+                    elif impact == 'bearish':
+                        emoji = "📉"
+                    else:
+                        emoji = "➡️"
+                    
+                    signals_list.append(f"  {emoji} {symbol}: {impact.upper()} ({change_pct:+.2f}%)")
+            
+            # Overall score if available
+            overall_score = prediction_signals.get('overall_score')
+            if overall_score is not None:
+                signals_list.append(f"\n📊 Market Score: {overall_score:.2f}")
+            
+            if not signals_list:
+                signals_list = ["• No significant signals detected", "• Market conditions stable", "• Continue monitoring"]
+            
+            signals_text = "\n".join(signals_list)
+            self.signals_text.setPlainText(signals_text)
+            
+        except Exception as e:
+            print(f"Error updating market factors: {e}")
+            import traceback
+            traceback.print_exc()
+            # Set default values on error
+            self.dxy_price_label.setText("Error")
+            self.correlation_status_label.setText("Error")
+            self.recommendation_label.setText("ERROR")
+            self.signals_text.setPlainText(f"Error loading prediction data: {str(e)}")
+            
+        except Exception as e:
+            print(f"Error updating market factors: {e}")
+            # Set default values on error
+            self.dxy_price_label.setText("Error")
+            self.correlation_status_label.setText("Error")
+            self.recommendation_label.setText("ERROR")
+            self.signals_text.setPlainText(f"Error loading prediction data: {str(e)}")
+    
     def handle_error(self, error_message):
         """Handle errors from data collection"""
         self.status_bar.showMessage(f"❌ Error: {error_message}")
@@ -485,14 +907,14 @@ class GoldPredictorGUI(QMainWindow):
             self.error_status_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
             self.error_code_label.setText(f"Error Code: {error_info['error_code']}")
             self.error_description_label.setText(f"Description: {error_info['description']}")
-            self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal; word-wrap: true;")
+            self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal;")
         else:
             # Show generic error if no specific API error code
             self.error_status_label.setText("❌ General Error")
             self.error_status_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
             self.error_code_label.setText("Error Code: N/A")
             self.error_description_label.setText(f"Description: {error_message}")
-            self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal; word-wrap: true;")
+            self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal;")
     
     def manual_refresh(self):
         """Manual refresh button handler - forces fresh API call"""

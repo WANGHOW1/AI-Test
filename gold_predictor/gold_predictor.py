@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timedelta
 import pytz
 import time
+from financial_scraper import CNBCFinancialScraper
 
 class GoldPricePredictor:
     def __init__(self):
@@ -19,6 +20,13 @@ class GoldPricePredictor:
         self.api_key = "83b60dc2419a755761c2c76541943a5a"
         self.monthly_limit = 600
         self.london_tz = pytz.timezone('Europe/London')
+        
+        # Comprehensive Financial Data Scraper (handles DXY and all other instruments)
+        self.financial_scraper = CNBCFinancialScraper()
+        self.dxy_cache = None
+        self.dxy_last_fetch = None
+        self.financial_cache = None
+        self.financial_last_fetch = None
         
         # Historical Data Products (from API response) - Comprehensive list
         self.available_products = {
@@ -502,6 +510,211 @@ class GoldPricePredictor:
             return data
         else:
             return {"error": source}
+    
+    def get_dxy_data(self, force_refresh=False):
+        """Get USD Index (DXY) data with caching"""
+        try:
+            # Check cache (cache for 10 minutes)
+            now = datetime.now()
+            if (not force_refresh and 
+                self.dxy_cache and 
+                self.dxy_last_fetch and 
+                (now - self.dxy_last_fetch).total_seconds() < 600):
+                return self.dxy_cache
+            
+            # Fetch fresh DXY data using enhanced scraper
+            dxy_data = self.financial_scraper.get_dxy_data()
+            if dxy_data:
+                self.dxy_cache = dxy_data
+                self.dxy_last_fetch = now
+                return dxy_data
+            else:
+                # Return cached data if available, even if stale
+                return self.dxy_cache if self.dxy_cache else None
+                
+        except Exception as e:
+            print(f"Warning: DXY data fetch failed: {e}")
+            return self.dxy_cache if self.dxy_cache else None
+    
+    def get_enhanced_financial_data(self, force_refresh=False):
+        """Get enhanced financial data (Treasury, VIX, TIPS, GLD) with caching"""
+        try:
+            # Check cache (cache for 15 minutes)
+            now = datetime.now()
+            if (not force_refresh and 
+                self.financial_cache and 
+                self.financial_last_fetch and 
+                (now - self.financial_last_fetch).total_seconds() < 900):
+                return self.financial_cache
+            
+            # Fetch fresh financial data using the comprehensive method
+            financial_data = self.financial_scraper.get_all_financial_data()
+            if financial_data and financial_data.get('financial_instruments'):
+                self.financial_cache = financial_data['financial_instruments']
+                self.financial_last_fetch = now
+                return financial_data['financial_instruments']
+            else:
+                # Return cached data if available, even if stale
+                return self.financial_cache if self.financial_cache else None
+                
+        except Exception as e:
+            print(f"Warning: Enhanced financial data fetch failed: {e}")
+            return self.financial_cache if self.financial_cache else None
+    
+    def get_market_factors(self):
+        """Get comprehensive market factors for prediction including enhanced data"""
+        factors = {}
+        
+        # Get current gold price data
+        gold_price, source, gold_data = self.get_current_gold_price()
+        factors['gold_price'] = gold_price
+        factors['gold_source'] = source
+        
+        # Get DXY data (legacy support)
+        dxy_data = self.get_dxy_data()
+        if dxy_data:
+            factors['dxy_price'] = dxy_data.get('current_price', 0)
+            factors['dxy_change'] = dxy_data.get('change', 0)
+            factors['dxy_change_percent'] = dxy_data.get('change_percent', '0%')
+            factors['dxy_timestamp'] = dxy_data.get('timestamp', '')
+        
+        # Get enhanced financial data
+        enhanced_data = self.get_enhanced_financial_data()
+        if enhanced_data:
+            factors['financial_instruments'] = enhanced_data
+            
+            # Calculate comprehensive market impact
+            impact_analysis = self.financial_scraper.calculate_gold_impact_score(enhanced_data)
+            if impact_analysis:
+                factors['market_impact'] = impact_analysis
+        
+        # Enhanced correlation analysis
+        if gold_data and 'changepercent' in gold_data:
+            try:
+                gold_change_pct = float(gold_data['changepercent'].replace('%', ''))
+                factors['gold_change_pct'] = gold_change_pct
+                
+                # Multi-factor correlation analysis
+                correlations = {}
+                
+                # DXY correlation (legacy)
+                if dxy_data:
+                    dxy_change_pct = float(dxy_data.get('change_percent', '0%').replace('%', '').replace('+', ''))
+                    correlations['dxy'] = {
+                        'change_pct': dxy_change_pct,
+                        'inverse_expected': True,
+                        'actual_inverse': gold_change_pct < 0 and dxy_change_pct > 0 or gold_change_pct > 0 and dxy_change_pct < 0,
+                        'strength': abs(gold_change_pct) * abs(dxy_change_pct)
+                    }
+                
+                # Enhanced instrument correlations
+                if enhanced_data:
+                    for symbol, data in enhanced_data.items():
+                        if data.get('change_percent'):
+                            try:
+                                change_pct = float(data['change_percent'].replace('%', '').replace('+', ''))
+                                inverse_expected = data['gold_impact'] == 'inverse'
+                                actual_inverse = gold_change_pct < 0 and change_pct > 0 or gold_change_pct > 0 and change_pct < 0
+                                
+                                correlations[symbol.lower()] = {
+                                    'change_pct': change_pct,
+                                    'inverse_expected': inverse_expected,
+                                    'actual_inverse': actual_inverse,
+                                    'strength': abs(gold_change_pct) * abs(change_pct),
+                                    'weight': data.get('weight', 0)
+                                }
+                            except:
+                                continue
+                
+                factors['correlations'] = correlations
+                
+            except Exception as e:
+                print(f"Error in correlation analysis: {e}")
+                factors['correlations'] = None
+        
+        # Add trading context
+        is_trading, london_time = self.is_london_trading_hours()
+        factors['is_trading_hours'] = is_trading
+        factors['london_time'] = london_time.isoformat()
+        
+        return factors
+    
+    def get_prediction_signals(self):
+        """Generate enhanced prediction signals based on multiple market factors"""
+        factors = self.get_market_factors()
+        signals = {
+            'timestamp': datetime.now().isoformat(),
+            'signals': [],
+            'confidence': 0,
+            'recommendation': 'HOLD',
+            'factor_analysis': {}
+        }
+        
+        # Use enhanced market impact if available
+        market_impact = factors.get('market_impact')
+        if market_impact:
+            # Use the enhanced scraper's analysis
+            signals['recommendation'] = market_impact.get('recommendation', 'HOLD')
+            signals['confidence'] = market_impact.get('confidence', 0)
+            signals['signals'] = market_impact.get('signals', [])
+            signals['overall_score'] = market_impact.get('overall_score', 0)
+            
+            # Add factor-by-factor analysis
+            enhanced_data = factors.get('financial_instruments', {})
+            for symbol, data in enhanced_data.items():
+                if data.get('change_percent'):
+                    try:
+                        change_pct = float(data['change_percent'].replace('%', '').replace('+', ''))
+                        impact = data['gold_impact']
+                        weight = data['weight']
+                        
+                        # Determine factor impact
+                        if impact == 'inverse':
+                            factor_impact = 'bearish' if change_pct > 0 else 'bullish'
+                        else:
+                            factor_impact = 'bullish' if change_pct > 0 else 'bearish'
+                        
+                        signals['factor_analysis'][symbol] = {
+                            'name': data['name'],
+                            'change_percent': change_pct,
+                            'impact_on_gold': factor_impact,
+                            'weight': weight,
+                            'significance': 'high' if abs(change_pct) > 1.0 else 'medium' if abs(change_pct) > 0.5 else 'low'
+                        }
+                    except:
+                        continue
+        else:
+            # Fallback to legacy DXY-only analysis
+            dxy_price = factors.get('dxy_price', 0)
+            dxy_change_pct = factors.get('dxy_change_percent', '0%')
+            
+            try:
+                dxy_change_num = float(dxy_change_pct.replace('%', '').replace('+', ''))
+            except:
+                dxy_change_num = 0
+                
+            # DXY-based signals
+            if dxy_price > 0:
+                if dxy_price > 105:
+                    signals['signals'].append("Strong USD (DXY > 105) - BEARISH for gold")
+                    signals['confidence'] += 20
+                elif dxy_price < 95:
+                    signals['signals'].append("Weak USD (DXY < 95) - BULLISH for gold")
+                    signals['confidence'] += 20
+                    
+                if abs(dxy_change_num) > 0.5:
+                    direction = "DOWN" if dxy_change_num > 0 else "UP"
+                    signals['signals'].append(f"Significant DXY move ({dxy_change_pct}) - Gold likely {direction}")
+                    signals['confidence'] += 15
+            
+            # Generate recommendation for legacy mode
+            if signals['confidence'] >= 30:
+                if any("BULLISH" in s or "UP" in s for s in signals['signals']):
+                    signals['recommendation'] = 'BUY'
+                elif any("BEARISH" in s or "DOWN" in s for s in signals['signals']):
+                    signals['recommendation'] = 'SELL'
+        
+        return signals
 
 def demo_gold_predictor():
     """Demonstrate the complete gold predictor functionality"""
