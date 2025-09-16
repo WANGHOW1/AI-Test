@@ -57,16 +57,34 @@ pip install PyQt5 requests beautifulsoup4 matplotlib numpy pandas scikit-learn p
 
 ### Step 3: Run the Application
 
+**⚠️ IMPORTANT: Make sure you're in the `gold_predictor` directory before running!**
+
 **Windows:**
 ```powershell
-python gold_gui.py
-# or
+# Ensure you're in the correct directory
+cd AI-Test/gold_predictor
+
+# Run the application (use 'py' if 'python' doesn't work)
 py gold_gui.py
+# or
+python gold_gui.py
 ```
 
 **macOS/Linux:**
 ```bash
+# Ensure you're in the correct directory
+cd AI-Test/gold_predictor
+
+# Run the application
 python3 gold_gui.py
+```
+
+**🔍 Quick Verification (before running):**
+```bash
+# Check you're in the right directory
+ls gold_gui.py           # Should show the file exists
+# or on Windows:
+dir gold_gui.py          # Should show the file exists
 ```
 
 ### Step 4: Verify Installation
@@ -81,6 +99,30 @@ The application should start and display:
 
 ### Common Issues
 
+**Issue: "Python was not found" (Windows)**
+```powershell
+# Problem: 'python' command not recognized
+# Solution 1: Use 'py' command instead (recommended for Windows)
+py gold_gui.py
+
+# Solution 2: Install Python from Microsoft Store
+# Search "Python" in Microsoft Store and install
+
+# Solution 3: Add Python to PATH during installation
+# Reinstall Python and check "Add Python to PATH"
+```
+
+**Issue: "No such file or directory" / "can't open file"**
+```bash
+# Problem: Running from wrong directory
+# Solution: Ensure you're in the gold_predictor directory
+cd AI-Test/gold_predictor  # Navigate to correct folder first
+py gold_gui.py            # Then run the application
+
+# Verify you're in the right place:
+ls                         # Should show gold_gui.py file
+```
+
 **Issue: "PyQt5 not found"**
 ```bash
 # Solution: Install PyQt5
@@ -89,9 +131,8 @@ pip install PyQt5
 
 **Issue: "Module not found" errors**
 ```bash
-# Solution: Ensure you're in the correct directory
-cd AI-Test/gold_predictor
-python gold_gui.py
+# Solution: Install all required packages
+pip install -r requirements.txt
 ```
 
 **Issue: "No data displayed"**
