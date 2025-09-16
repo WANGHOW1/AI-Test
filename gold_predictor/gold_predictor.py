@@ -7,10 +7,15 @@ Only makes requests during China trading hours (9:00 AM - 11:00 PM Beijing time)
 
 import requests
 import json
+import os
 from datetime import datetime, timedelta
 import pytz
 import time
+from dotenv import load_dotenv
 from financial_scraper import CNBCFinancialScraper
+
+# Load environment variables from .env file
+load_dotenv()
 
 class GoldPricePredictor:
     def __init__(self):
@@ -29,6 +34,15 @@ class GoldPricePredictor:
         self.financial_last_fetch = None
         
         # Historical Data Products (from API response) - Comprehensive list
+        # API URL: https://api.tanshuapi.com/api/precious_metals_history/v1/kline_data
+        # Example: https://api.tanshuapi.com/api/precious_metals_history/v1/kline_data?key=83b60dc2419a755761c2c76541943a5a&product=Au9999&type=1&limit=30
+        #
+        # PARAMETERS:
+        # - product: Product code (see available_products below)
+        # - type: Data type (1=日/Daily, 2=周/Weekly, 3=月/Monthly)
+        # - limit: Number of records (default 30, max 1000)
+        #
+        # AVAILABLE PRODUCTS:
         self.available_products = {
             'XAU': {'name': '国际黄金', 'english': 'International Gold', 'since': '2005-12-30'},
             'XAG': {'name': '国际白银', 'english': 'International Silver', 'since': '2005-12-27'},
@@ -41,8 +55,21 @@ class GoldPricePredictor:
             'Au100g': {'name': '100克金条', 'english': '100g Gold Bar', 'since': '2006-12-25'},
             'PT9995': {'name': '铂金9995', 'english': 'Platinum 9995', 'since': '2004-08-27'},
             'Ag9999': {'name': '白银9999', 'english': 'Silver 9999', 'since': '2012-09-06'},
+            'AuT+N1': {'name': '黄金单月延期', 'english': 'Gold Single Month Deferred', 'since': '2007-11-09'},
+            'AuT+N2': {'name': '黄金双月延期', 'english': 'Gold Double Month Deferred', 'since': '2007-11-08'},
             'AuT+D': {'name': '黄金延期', 'english': 'Gold Deferred', 'since': '2004-09-01'},
-            'AgT+D': {'name': '白银延期', 'english': 'Silver Deferred', 'since': '2006-11-01'}
+            'AgT+D': {'name': '白银延期', 'english': 'Silver Deferred', 'since': '2006-11-01'},
+            'SGiAu100g': {'name': 'i黄金100g', 'english': 'i Gold 100g', 'since': '2016-06-03'},
+            'SGiAu9999': {'name': 'i黄金9999', 'english': 'i Gold 9999', 'since': '2014-09-19'},
+            'mAuT+D': {'name': 'M黄金延期', 'english': 'M Gold Deferred', 'since': '2014-03-24'}
+        }
+        
+        # Historical Data Type Codes
+        # API Documentation for type parameter:
+        self.data_types = {
+            '1': {'name': '日', 'english': 'Daily'},
+            '2': {'name': '周', 'english': 'Weekly'}, 
+            '3': {'name': '月', 'english': 'Monthly'}
         }
         
         # API Call Tracking for Quota Management
@@ -327,6 +354,78 @@ class GoldPricePredictor:
         except Exception as e:
             return False, None, f"Request failed: {str(e)}"
     
+    def fetch_gold_price_from_cnbc(self):
+        """
+        Fetch gold price from CNBC website using web scraping
+        Returns:
+            tuple: (success, price_usd, message)
+        """
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            import re
+            
+            print("🔄 Fetching gold price from CNBC...")
+            
+            url = "https://www.cnbc.com/quotes/XAU="
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Look for the price element - CNBC typically uses specific classes for quotes
+                # Try multiple selectors to find the price
+                price_selectors = [
+                    '[data-module="Quote"] .QuoteStrip-lastPrice',
+                    '.QuoteStrip-lastPrice',
+                    '.quote-price',
+                    '[data-testid="last-price"]',
+                    '.QuoteStrip-priceValue'
+                ]
+                
+                price_text = None
+                for selector in price_selectors:
+                    price_element = soup.select_one(selector)
+                    if price_element:
+                        price_text = price_element.get_text().strip()
+                        break
+                
+                # If standard selectors don't work, try finding price in text content
+                if not price_text:
+                    # Look for price pattern in the page text
+                    page_text = soup.get_text()
+                    # Look for patterns like "3,681.41" or "$3,681.41"
+                    price_pattern = r'[\$]?(\d{1,2},\d{3}\.\d{2})'
+                    matches = re.findall(price_pattern, page_text)
+                    
+                    if matches:
+                        # Take the first match that looks like a gold price (around 2000-5000 range)
+                        for match in matches:
+                            price_val = float(match.replace(',', ''))
+                            if 2000 <= price_val <= 5000:  # Reasonable gold price range
+                                price_text = match
+                                break
+                
+                if price_text:
+                    # Clean and convert the price
+                    price_clean = price_text.replace('$', '').replace(',', '')
+                    price_usd = float(price_clean)
+                    
+                    print(f"✅ Successfully fetched gold price from CNBC: ${price_usd:.2f}")
+                    return True, price_usd, f"CNBC Web (${price_usd:.2f})"
+                else:
+                    return False, None, "Could not find price element on CNBC page"
+            else:
+                return False, None, f"HTTP Error: {response.status_code}"
+                
+        except Exception as e:
+            print(f"❌ Error fetching from CNBC: {e}")
+            return False, None, f"CNBC fetch failed: {str(e)}"
+    
     def fetch_gold_price_from_api(self, force=False):
         """
         Fetch gold price from Tanshu API
@@ -419,25 +518,57 @@ class GoldPricePredictor:
         return False, None, "No data available"
 
     def get_current_gold_price(self, force_refresh=False):
-        """Get current gold price in USD per troy ounce"""
-        success, data, source = self.get_cached_or_fresh_data(force_refresh)
+        """Get current gold price in USD per troy ounce using CNBC scraping"""
         
-        if success and data and 'data' in data and 'list' in data['data']:
-            # Extract London Gold price (first item is usually 伦敦金)
-            gold_list = data['data']['list']
-            london_gold = None
+        # NEW: Use CNBC scraping for gold price
+        try:
+            gold_data = self.financial_scraper.get_gold_price()
             
-            for item in gold_list:
-                if item['type'] == '伦敦金':  # London Gold
-                    london_gold = item
-                    break
-            
-            if london_gold:
-                usd_price = float(london_gold['price'])
-                self.cached_price_usd = usd_price
-                self.cached_london_price = usd_price  # Same value since already in USD
+            if gold_data and gold_data.get('current_price'):
+                usd_price = gold_data['current_price']
+                source = f"CNBC Web (Live)"
                 
-                return usd_price, source, london_gold
+                # Create mock london_data structure for compatibility
+                london_data = {
+                    'type': 'Gold Spot',
+                    'price': str(usd_price),
+                    'change': gold_data.get('change', '0'),
+                    'change_percent': gold_data.get('change_percent', '0%'),
+                    'timestamp': gold_data.get('timestamp')
+                }
+                
+                # Cache the data
+                self.cached_price_usd = usd_price
+                self.cached_london_price = usd_price
+                self.last_fetch_time = datetime.now()
+                
+                print(f"✅ Gold price from CNBC: ${usd_price:.2f}")
+                return usd_price, source, london_data
+            else:
+                print("⚠️ Could not fetch gold price from CNBC, falling back to cached or API data")
+                
+        except Exception as e:
+            print(f"⚠️ CNBC fetch error: {e}, falling back to cached or API data")
+        
+        # FALLBACK: Comment out API calls but keep for backup
+        # success, data, source = self.get_cached_or_fresh_data(force_refresh)
+        # 
+        # if success and data and 'data' in data and 'list' in data['data']:
+        #     # Extract London Gold price (first item is usually 伦敦金)
+        #     gold_list = data['data']['list']
+        #     london_gold = None
+        #     
+        #     for item in gold_list:
+        #         if item['type'] == '伦敦金':  # London Gold
+        #             london_gold = item
+        #             break
+        #     
+        #     if london_gold:
+        #         usd_price = float(london_gold['price'])
+        #         self.cached_price_usd = usd_price
+        #         self.cached_london_price = usd_price  # Same value since already in USD
+        #         
+        #         return usd_price, source, london_gold
         
         # Return cached price if available
         if self.cached_price_usd:
@@ -446,50 +577,86 @@ class GoldPricePredictor:
             return self.cached_price_usd, f"Cached ({age_minutes}min old)", self.cached_london_price
         
         # Fallback to reasonable estimate
-        fallback_price = 2650.0
+        fallback_price = 3650.0  # Updated to current gold price range
+        print(f"⚠️ Using fallback price: ${fallback_price}")
         return fallback_price, "Fallback estimate", None
     
     def get_detailed_market_info(self, force_refresh=False):
-        """Get detailed market information for all London precious metals"""
-        success, data, source = self.get_cached_or_fresh_data(force_refresh)
+        """Get detailed market information - now primarily from CNBC gold data"""
         
-        if not success or not data or 'data' not in data or 'list' not in data['data']:
-            return {"error": source or "Invalid data format"}
-        
-        metals_list = data['data']['list']
-        processed_data = {}
-        
-        # Map of metal types
-        metal_names = {
-            '伦敦金': 'London Gold',
-            '伦敦银': 'London Silver', 
-            '铂金期货': 'Platinum Futures',
-            '钯金期货': 'Palladium Futures'
-        }
-        
-        for item in metals_list:
-            metal_type = item['type']
-            english_name = metal_names.get(metal_type, metal_type)
-            usd_price = float(item['price'])
+        # Try to get gold data from CNBC
+        try:
+            gold_data = self.financial_scraper.get_gold_price()
             
-            processed_data[metal_type] = {
-                'name': english_name,
-                'chinese_name': metal_type,
-                'usd_price': usd_price,
-                'change_amount': item['changequantity'],
-                'change_percent': item['changepercent'],
-                'opening_price': item['openingprice'],
-                'high_price': item['maxprice'],
-                'low_price': item['minprice'],
-                'previous_close': item['lastclosingprice'],
-                'update_time': item['updatetime']
-            }
+            if gold_data:
+                # Create mock data structure for compatibility
+                mock_data = {
+                    'code': 1,
+                    'msg': 'Success from CNBC',
+                    'data': {
+                        'list': [{
+                            'type': 'Gold Spot (CNBC)',
+                            'price': str(gold_data['current_price']),
+                            'change': gold_data.get('change', '0'),
+                            'change_percent': gold_data.get('change_percent', '0%'),
+                            'day_high': gold_data.get('day_high', '0'),
+                            'day_low': gold_data.get('day_low', '0'),
+                            'prev_close': gold_data.get('prev_close', '0')
+                        }]
+                    }
+                }
+                return mock_data
+        except Exception as e:
+            print(f"⚠️ Error getting CNBC market info: {e}")
         
+        # COMMENTED OUT: Original API call
+        # success, data, source = self.get_cached_or_fresh_data(force_refresh)
+        # 
+        # if not success or not data or 'data' not in data or 'list' not in data['data']:
+        #     return {"error": source or "Invalid data format"}
+        
+        # Return minimal fallback data
         return {
-            'data': processed_data,
-            'exchange_rate': self.usd_gbp_rate,
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "error": "Market data unavailable",
+            "note": "API calls commented out, using CNBC scraping instead"
         }
+        
+        # COMMENTED OUT: Legacy code that would process metals_list data
+        # metals_list = data['data']['list']
+        # processed_data = {}
+        # 
+        # # Map of metal types
+        # metal_names = {
+        #     '伦敦金': 'London Gold',
+        #     '伦敦银': 'London Silver', 
+        #     '铂金期货': 'Platinum Futures',
+        #     '钯金期货': 'Palladium Futures'
+        # }
+        
+        # COMMENTED OUT: Legacy processing code
+        # for item in metals_list:
+        #     metal_type = item['type']
+        #     english_name = metal_names.get(metal_type, metal_type)
+        #     usd_price = float(item['price'])
+        #     
+        #     processed_data[metal_type] = {
+        #         'name': english_name,
+        #         'chinese_name': metal_type,
+        #         'usd_price': usd_price,
+        #         'change_amount': item['changequantity'],
+        #         'change_percent': item['changepercent'],
+        #         'opening_price': item['openingprice'],
+        #         'high_price': item['maxprice'],
+        #         'low_price': item['minprice'],
+        #         'previous_close': item['lastclosingprice'],
+        #         'update_time': item['updatetime']
+        #     }
+        # 
+        # return {
+        #     'data': processed_data,
+        #     'exchange_rate': self.usd_gbp_rate,
+        #     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # }
     
     def get_api_stats(self):
         """Get API usage statistics for debugging"""
@@ -504,12 +671,77 @@ class GoldPricePredictor:
         return stats
 
     def get_raw_api_response(self, force_refresh=False):
-        """Get raw JSON response from the API for debugging"""
-        success, data, source = self.get_cached_or_fresh_data(force_refresh)
-        if success:
-            return data
-        else:
-            return {"error": source}
+        """Get raw response from all financial data sources for debugging"""
+        try:
+            all_data = {}
+            
+            # 1. Gold Price (XAU=)
+            gold_data = self.financial_scraper.get_gold_price()
+            all_data['XAU_Gold'] = {
+                "source": "CNBC",
+                "symbol": "XAU=",
+                "name": "Gold Spot Price",
+                "data": gold_data if gold_data else {"error": "Failed to fetch"},
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # 2. US Dollar Index (DXY)
+            dxy_data = self.financial_scraper.get_dxy_data()
+            all_data['DXY_Index'] = {
+                "source": "CNBC", 
+                "symbol": ".DXY",
+                "name": "US Dollar Index",
+                "data": dxy_data if dxy_data else {"error": "Failed to fetch"},
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # 3. USD/CNY Exchange Rate
+            usdcny_data = self.financial_scraper.get_usd_cny_rate()
+            all_data['USD_CNY'] = {
+                "source": "CNBC",
+                "symbol": "CNY=",
+                "name": "USD/CNY Exchange Rate", 
+                "data": usdcny_data if usdcny_data else {"error": "Failed to fetch"},
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # 4-6. Get other market factors (US10Y, TIPS, VIX, GLD)
+            try:
+                instruments = ['.DXY', 'US10Y', 'US10YTIP', 'VIX', 'GLD', 'CNY%3d']
+                for instrument in instruments:
+                    if instrument == '.DXY' or instrument == 'CNY%3d':
+                        continue  # Already handled above
+                        
+                    instrument_data = self.financial_scraper.get_instrument_data(instrument)
+                    instrument_info = self.financial_scraper.instruments.get(instrument, {})
+                    
+                    key_name = instrument.replace('%3d', '').replace('.', '')
+                    all_data[f'{key_name}_Data'] = {
+                        "source": "CNBC",
+                        "symbol": instrument,
+                        "name": instrument_info.get('name', instrument),
+                        "data": instrument_data if instrument_data else {"error": "Failed to fetch"},
+                        "timestamp": datetime.now().isoformat()
+                    }
+            except Exception as e:
+                all_data['Instruments_Error'] = {
+                    "error": f"Failed to fetch instrument data: {str(e)}",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            return {
+                "status": "success",
+                "total_sources": len(all_data),
+                "sources": all_data,
+                "last_updated": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": f"Exception occurred: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
     
     def get_dxy_data(self, force_refresh=False):
         """Get USD Index (DXY) data with caching"""

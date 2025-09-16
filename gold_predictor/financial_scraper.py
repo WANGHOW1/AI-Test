@@ -59,6 +59,13 @@ class CNBCFinancialScraper:
                 'gold_impact': 'positive',  # Higher GLD = Higher Gold demand
                 'weight': 0.15,
                 'description': 'ETF demand directly affects gold prices'
+            },
+            'CNY%3d': {
+                'name': 'USD/CNY Exchange Rate',
+                'symbol': 'USDCNY',
+                'gold_impact': 'conversion',  # Used for CNY price conversion
+                'weight': 0.0,  # No weight in prediction, just for conversion
+                'description': 'USD to Chinese Yuan exchange rate for price conversion'
             }
         }
         
@@ -402,6 +409,117 @@ class CNBCFinancialScraper:
         except Exception as e:
             print(f"Warning: DXY data extraction failed: {e}")
             return None
+
+    def get_usd_cny_rate(self):
+        """
+        Get current USD/CNY exchange rate from CNBC
+        Returns the exchange rate as a float
+        """
+        try:
+            usd_cny_data = self.get_instrument_data('CNY%3d')
+            if usd_cny_data and usd_cny_data.get('current_price'):
+                return float(usd_cny_data['current_price'])
+            return None
+        except Exception as e:
+            print(f"Warning: USD/CNY rate extraction failed: {e}")
+            return None
+
+    def convert_gold_to_cny_per_gram(self, usd_per_troy_ounce, usd_cny_rate=None):
+        """
+        Convert gold price from USD per troy ounce to CNY per gram
+        
+        Args:
+            usd_per_troy_ounce (float): Gold price in USD per troy ounce
+            usd_cny_rate (float, optional): USD/CNY exchange rate. If None, fetches current rate
+            
+        Returns:
+            dict: Contains CNY per gram price and conversion details
+        """
+        try:
+            # Get exchange rate if not provided
+            if usd_cny_rate is None:
+                usd_cny_rate = self.get_usd_cny_rate()
+                if usd_cny_rate is None:
+                    return None
+            
+            # Conversion constants
+            GRAMS_PER_TROY_OUNCE = 31.1034768
+            
+            # Convert troy ounce to grams
+            usd_per_gram = usd_per_troy_ounce / GRAMS_PER_TROY_OUNCE
+            
+            # Convert USD to CNY
+            cny_per_gram = usd_per_gram * usd_cny_rate
+            
+            return {
+                'cny_per_gram': round(cny_per_gram, 2),
+                'usd_per_gram': round(usd_per_gram, 2),
+                'usd_per_troy_ounce': usd_per_troy_ounce,
+                'usd_cny_rate': usd_cny_rate,
+                'conversion_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"Warning: Gold price conversion failed: {e}")
+            return None
+    
+    def get_gold_price(self):
+        """
+        Get current gold price from CNBC using the same pattern as other instruments
+        Returns gold price in USD per troy ounce
+        """
+        max_retries = 2
+        
+        for attempt in range(max_retries):
+            try:
+                # XAU= is the gold spot price symbol on CNBC
+                url = f"{self.base_url}XAU%3D"  # URL encoded version of XAU=
+                timeout = 15 if attempt == 0 else 20
+                
+                print(f"🔄 Fetching gold price from CNBC (attempt {attempt + 1})...")
+                response = requests.get(url, headers=self.headers, timeout=timeout)
+                
+                if response.status_code != 200:
+                    if attempt < max_retries - 1:
+                        print(f"Attempt {attempt + 1} failed, retrying...")
+                        time.sleep(2)
+                        continue
+                    return None
+                
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Extract price data using the same method as other instruments
+                price_data = self._extract_price_data(soup, 'XAU')
+                
+                if price_data['current_price']:
+                    result = {
+                        'timestamp': datetime.now().isoformat(),
+                        'symbol': 'XAU',
+                        'name': 'Gold Spot Price',
+                        'source': 'CNBC',
+                        'unit': 'USD per troy ounce',
+                        **price_data
+                    }
+                    
+                    print(f"✅ Successfully fetched gold price: ${price_data['current_price']:.2f}")
+                    return result
+                else:
+                    if attempt < max_retries - 1:
+                        print(f"Could not extract price, retrying...")
+                        time.sleep(2)
+                        continue
+                    return None
+                    
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Attempt {attempt + 1} failed: {e}, retrying...")
+                    time.sleep(2)
+                    continue
+                else:
+                    print(f"Error fetching gold price after {max_retries} attempts: {e}")
+                    return None
+        
+        return None
 
 def test_enhanced_scraper():
     """Test the enhanced financial scraper"""
