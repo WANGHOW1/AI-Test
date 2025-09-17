@@ -581,14 +581,25 @@ class GoldPricePredictor:
         print(f"⚠️ Using fallback price: ${fallback_price}")
         return fallback_price, "Fallback estimate", None
     
-    def get_detailed_market_info(self, force_refresh=False):
-        """Get detailed market information - now primarily from CNBC gold data"""
+    def get_detailed_market_info(self, force_refresh=False, gold_data=None):
+        """
+        Get detailed market information - now primarily from CNBC gold data
+        Args:
+            force_refresh (bool): Force refresh flag
+            gold_data (dict): Optional pre-fetched gold data to avoid duplicate calls
+        """
         
-        # Try to get gold data from CNBC
-        try:
-            gold_data = self.financial_scraper.get_gold_price()
-            
-            if gold_data:
+        # Use provided gold data or fetch if not provided
+        if gold_data is None:
+            # Try to get gold data from CNBC
+            try:
+                gold_data = self.financial_scraper.get_gold_price()
+            except Exception as e:
+                print(f"⚠️ Could not fetch gold data: {e}")
+                gold_data = None
+        
+        if gold_data:
+            try:
                 # Create mock data structure for compatibility
                 mock_data = {
                     'code': 1,
@@ -606,8 +617,8 @@ class GoldPricePredictor:
                     }
                 }
                 return mock_data
-        except Exception as e:
-            print(f"⚠️ Error getting CNBC market info: {e}")
+            except Exception as e:
+                print(f"⚠️ Error processing gold data: {e}")
         
         # COMMENTED OUT: Original API call
         # success, data, source = self.get_cached_or_fresh_data(force_refresh)
@@ -793,12 +804,20 @@ class GoldPricePredictor:
             print(f"Warning: Enhanced financial data fetch failed: {e}")
             return self.financial_cache if self.financial_cache else None
     
-    def get_market_factors(self):
-        """Get comprehensive market factors for prediction including enhanced data"""
+    def get_market_factors(self, gold_price_data=None):
+        """
+        Get comprehensive market factors for prediction including enhanced data
+        Args:
+            gold_price_data (tuple): Optional pre-fetched gold price data (price, source, london_data)
+        """
         factors = {}
         
-        # Get current gold price data
-        gold_price, source, gold_data = self.get_current_gold_price()
+        # Use provided gold price data or fetch if not provided
+        if gold_price_data:
+            gold_price, source, gold_data = gold_price_data
+        else:
+            gold_price, source, gold_data = self.get_current_gold_price()
+            
         factors['gold_price'] = gold_price
         factors['gold_source'] = source
         

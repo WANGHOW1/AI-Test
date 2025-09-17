@@ -28,55 +28,79 @@ except ImportError:
     print("⚠️ Matplotlib not available. Charts will be disabled.")
     MATPLOTLIB_AVAILABLE = False
 
-# Import our gold predictor
+# Import our gold predictor and technical indicators
 from gold_predictor import GoldPricePredictor
+from technical_indicators import TechnicalIndicatorsEngine
 
 class GoldDataWorker(QThread):
     """Background worker for gold price data collection"""
     data_updated = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
     
-    def __init__(self, predictor, force_refresh=False, fetch_historical=True):
+    def __init__(self, predictor, force_refresh=False, fetch_historical=True, fetch_market_factors=True, refresh_type="full"):
         super().__init__()
         self.predictor = predictor
         self.running = True
         self.force_refresh = force_refresh
         self.fetch_historical = fetch_historical
+        self.fetch_market_factors = fetch_market_factors
+        self.refresh_type = refresh_type  # "full", "price_only", "market_factors"
         
     def run(self):
         """Collect gold price data in background thread"""
         try:
-            # Get current price (with force_refresh if manual)
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            print(f"\n🔄 [{timestamp}] Starting {self.refresh_type} refresh...")
+            
+            # Always get current price and basic info (lightweight)
             usd_price, source, london_data = self.predictor.get_current_gold_price(self.force_refresh)
             
-            # Get detailed market info (will use same cached data)
-            market_info = self.predictor.get_detailed_market_info(self.force_refresh)
-            
-            # Get schedule info
+            # Get schedule info (lightweight)
             schedule = self.predictor.get_trading_schedule_info()
             
-            # Get market factors including DXY
-            market_factors = self.predictor.get_market_factors()
-            
-            # Get prediction signals
-            prediction_signals = self.predictor.get_prediction_signals()
-            
-            # Get historical data for chart (30 days of daily data) - only on first load
+            # Initialize optional data
+            market_info = None
+            market_factors = None
+            prediction_signals = None
             historical_data = None
-            if self.fetch_historical:
+            
+            if self.refresh_type in ["full", "market_factors"]:
+                print(f"📊 [{timestamp}] Fetching market factors...")
+                
+                # Extract gold data for reuse
+                gold_data = {
+                    'current_price': usd_price,
+                    'change': london_data.get('change', '0'),
+                    'change_percent': london_data.get('change_percent', '0%'),
+                    'timestamp': london_data.get('timestamp')
+                }
+                
+                # Get detailed market info (pass gold data to avoid duplicate calls)
+                market_info = self.predictor.get_detailed_market_info(self.force_refresh, gold_data)
+                
+                # Get market factors including DXY (pass already-fetched gold price data)
+                gold_price_data = (usd_price, source, london_data)
+                market_factors = self.predictor.get_market_factors(gold_price_data)
+                
+                # Get prediction signals
+                prediction_signals = self.predictor.get_prediction_signals()
+            
+            if self.refresh_type == "full" and self.fetch_historical:
+                print(f"📈 [{timestamp}] Fetching historical data...")
                 try:
                     success, hist_data, msg = self.predictor.fetch_historical_data(
                         product='XAU', 
                         data_type='1',  # daily data
-                        limit=30,       # 30 days (default recommended)
+                        limit=80,       # 80 days needed for technical indicators
                         force=self.force_refresh
                     )
                     if success:
                         historical_data = hist_data
                     else:
-                        print(f"⚠️ Historical data fetch failed: {msg}")
+                        print(f"⚠️ [{timestamp}] Historical data fetch failed: {msg}")
                 except Exception as e:
-                    print(f"⚠️ Historical data error: {e}")
+                    print(f"⚠️ [{timestamp}] Historical data error: {e}")
             
             result = {
                 'current_price_usd': usd_price,
@@ -87,20 +111,33 @@ class GoldDataWorker(QThread):
                 'market_factors': market_factors,
                 'prediction_signals': prediction_signals,
                 'historical_data': historical_data,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'refresh_type': self.refresh_type
             }
             
+            print(f"✅ [{timestamp}] {self.refresh_type.title()} refresh completed")
             self.data_updated.emit(result)
             
         except Exception as e:
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            print(f"❌ [{timestamp}] Refresh error: {e}")
             self.error_occurred.emit(str(e))
 
 class GoldPredictorGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.predictor = GoldPricePredictor()
+        self.technical_engine = TechnicalIndicatorsEngine()  # Add technical indicators engine
         self.data_worker = None
         self.initial_load_complete = False  # Flag to track first load
+        self.cached_historical_data = None  # Cache historical data to avoid repeated API calls
+        
+        # Multi-tier refresh tracking
+        self.last_market_factors_refresh = None
+        self.last_technical_indicators_refresh = None
+        self.market_factors_interval = 600  # 10 minutes in seconds
+        self.refresh_count = 0  # Track refresh cycles
+        
         self.init_ui()
         self.setup_timer()
         
@@ -309,19 +346,97 @@ class GoldPredictorGUI(QMainWindow):
         market_tab = QWidget()
         market_layout = QVBoxLayout(market_tab)
         
-        # Gold products table
-        products_group = QGroupBox("📊 London Precious Metals Market")
-        products_layout = QVBoxLayout(products_group)
+        # Technical Indicators Dashboard
+        indicators_group = QGroupBox("🎯 Technical Analysis Dashboard")
+        indicators_layout = QVBoxLayout(indicators_group)
         
-        self.products_table = QTableWidget()
-        self.products_table.setColumnCount(7)
-        self.products_table.setHorizontalHeaderLabels([
-            "Metal", "English Name", "USD Price", "Change %", "Daily Range", "Previous Close", "Last Update"
+        # Overall sentiment header
+        sentiment_layout = QHBoxLayout()
+        
+        self.overall_sentiment_label = QLabel("Overall Signal: Loading...")
+        self.overall_sentiment_label.setStyleSheet("""
+            font-size: 18px; 
+            font-weight: bold; 
+            color: #FFD700; 
+            background-color: #2b2b2b; 
+            padding: 10px; 
+            border: 2px solid #555; 
+            border-radius: 5px;
+            text-align: center;
+        """)
+        sentiment_layout.addWidget(self.overall_sentiment_label)
+        
+        self.sentiment_score_label = QLabel("Score: --")
+        self.sentiment_score_label.setStyleSheet("""
+            font-size: 14px; 
+            font-weight: bold; 
+            color: #87CEEB; 
+            background-color: #1e1e1e; 
+            padding: 10px; 
+            border: 1px solid #555; 
+            border-radius: 5px;
+            min-width: 150px;
+        """)
+        sentiment_layout.addWidget(self.sentiment_score_label)
+        
+        indicators_layout.addLayout(sentiment_layout)
+        
+        # Technical indicators table
+        self.indicators_table = QTableWidget()
+        self.indicators_table.setColumnCount(5)
+        self.indicators_table.setHorizontalHeaderLabels([
+            "Indicator", "Value", "Signal", "Category", "Details"
         ])
-        self.products_table.setAlternatingRowColors(True)
-        products_layout.addWidget(self.products_table)
+        self.indicators_table.setAlternatingRowColors(True)
+        self.indicators_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #2b2b2b;
+                border: 1px solid #555;
+                gridline-color: #555;
+                color: white;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #444;
+            }
+            QHeaderView::section {
+                background-color: #1e1e1e;
+                color: #FFD700;
+                font-weight: bold;
+                padding: 10px;
+                border: none;
+            }
+        """)
         
-        market_layout.addWidget(products_group)
+        # Set column widths
+        self.indicators_table.setColumnWidth(0, 120)  # Indicator
+        self.indicators_table.setColumnWidth(1, 100)  # Value
+        self.indicators_table.setColumnWidth(2, 80)   # Signal
+        self.indicators_table.setColumnWidth(3, 120)  # Category
+        self.indicators_table.setColumnWidth(4, 100)  # Details
+        
+        indicators_layout.addWidget(self.indicators_table)
+        
+        # Refresh button for technical analysis
+        refresh_indicators_btn = QPushButton("🔄 Refresh Technical Analysis")
+        refresh_indicators_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 8px 15px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        refresh_indicators_btn.clicked.connect(self.refresh_technical_indicators)
+        indicators_layout.addWidget(refresh_indicators_btn)
+        
+        market_layout.addWidget(indicators_group)
         
         # Historical Price Chart
         chart_group = QGroupBox("📊 Gold Price Trend")
@@ -870,17 +985,54 @@ class GoldPredictorGUI(QMainWindow):
         self.refresh_data()
     
     def refresh_data(self, force_refresh=False):
-        """Refresh gold price data"""
+        """Smart multi-tier refresh system"""
         if self.data_worker and self.data_worker.isRunning():
             return  # Don't start new request if one is already running
         
-        if force_refresh:
-            self.status_bar.showMessage("Force refreshing gold price data...")
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        self.refresh_count += 1
+        
+        # Determine what type of refresh to perform
+        refresh_type = "price_only"  # Default: just price and trading status
+        fetch_historical = False
+        fetch_market_factors = False
+        
+        # First load: get everything
+        if not self.initial_load_complete or force_refresh:
+            refresh_type = "full"
+            fetch_historical = True
+            fetch_market_factors = True
+            print(f"🚀 [{now.strftime('%H:%M:%S')}] Initial/Force refresh - fetching all data")
+            
+        # Market factors refresh (every 10 minutes)
+        elif (self.last_market_factors_refresh is None or 
+              (now - self.last_market_factors_refresh).total_seconds() >= self.market_factors_interval):
+            refresh_type = "market_factors"
+            fetch_market_factors = True
+            self.last_market_factors_refresh = now
+            print(f"📊 [{now.strftime('%H:%M:%S')}] Market factors refresh (every 10 min)")
+            
+        # Regular price refresh (every 30 seconds)
         else:
-            self.status_bar.showMessage("Fetching gold price data...")
+            print(f"💰 [{now.strftime('%H:%M:%S')}] Price-only refresh (30 sec interval)")
+        
+        # Update status
+        if force_refresh:
+            self.status_bar.showMessage(f"Force refreshing data... (#{self.refresh_count})")
+        else:
+            self.status_bar.showMessage(f"Refresh #{self.refresh_count} - {refresh_type}")
+            
         self.refresh_button.setEnabled(False)
         
-        self.data_worker = GoldDataWorker(self.predictor, force_refresh, not self.initial_load_complete)
+        # Create worker with appropriate settings
+        self.data_worker = GoldDataWorker(
+            self.predictor, 
+            force_refresh, 
+            fetch_historical, 
+            fetch_market_factors,
+            refresh_type
+        )
         self.data_worker.data_updated.connect(self.update_display)
         self.data_worker.error_occurred.connect(self.handle_error)
         self.data_worker.finished.connect(lambda: self.refresh_button.setEnabled(True))
@@ -889,7 +1041,13 @@ class GoldPredictorGUI(QMainWindow):
     def update_display(self, data):
         """Update the GUI with new data"""
         try:
-            # Update main price display
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            refresh_type = data.get('refresh_type', 'unknown')
+            
+            print(f"🔄 [{timestamp}] Updating display for {refresh_type} refresh...")
+            
+            # Always update price and basic info
             usd_price = data['current_price_usd']
             source = data['source']
             
@@ -910,172 +1068,211 @@ class GoldPredictorGUI(QMainWindow):
                     self.cny_price_label.setText("Conversion Failed")
                     self.usd_cny_rate_label.setText("N/A")
             except Exception as e:
-                print(f"Warning: CNY conversion failed: {e}")
+                print(f"⚠️ [{timestamp}] CNY conversion failed: {e}")
                 self.cny_price_label.setText("Conversion Error")
                 self.usd_cny_rate_label.setText("N/A")
             
             self.source_label.setText(f"📊 Source: {source}")
             self.timestamp_label.setText(f"⏰ Last Update: {data['timestamp']}")
             
-            # Update trading status
+            # Always update trading status
             schedule = data['schedule']
             trading_status = "✅ OPEN" if schedule['is_trading_hours'] else "❌ CLOSED"
             self.trading_status_label.setText(f"🏪 Trading Status: {trading_status}")
             self.london_time_label.setText(f"🇬🇧 London Time: {schedule['london_time'].strftime('%H:%M:%S')}")
             
-            # Update products table
-            market_info = data['market_info']
-            if 'data' in market_info:
-                self.update_products_table(market_info['data'])
+            # Update market factors and other data only if available
+            if data.get('market_factors') and refresh_type in ["full", "market_factors"]:
+                print(f"📊 [{timestamp}] Updating market factors...")
+                self.update_market_factors(data)
+                
+                # Update API info
+                self.optimal_interval_label.setText(f"⏱️ Optimal Interval: {schedule['optimal_interval_minutes']} minutes")
+                self.trading_days_label.setText(f"📅 Trading Days Left: ~{schedule['estimated_trading_days_remaining']}")
+                
+                # Update API status
+                api_status = "🟢 Active" if schedule['is_trading_hours'] else "🟡 Paused (Outside hours)"
+                self.api_status_label.setText(f"API Status: {api_status}")
+                
+                # Update error status - check for API errors
+                error_info = self.predictor.get_last_error_info()
+                if error_info:
+                    self.error_status_label.setText("❌ API Error Detected")
+                    self.error_status_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
+                    self.error_code_label.setText(f"Error Code: {error_info['error_code']}")
+                    self.error_description_label.setText(f"Description: {error_info['description']}")
+                    self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal;")
+                else:
+                    self.error_status_label.setText("✅ No errors detected")
+                    self.error_status_label.setStyleSheet("color: #90EE90; font-weight: bold;")
+                    self.error_code_label.setText("Error Code: None")
+                    self.error_description_label.setText("Description: All systems operational")
+                    self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal;")
+                
+                # Update raw API responses for all data sources
+                raw_response = self.predictor.get_raw_api_response()
+                self.update_raw_api_sections(raw_response)
             
-            # Update API info
-            self.optimal_interval_label.setText(f"⏱️ Optimal Interval: {schedule['optimal_interval_minutes']} minutes")
-            self.trading_days_label.setText(f"📅 Trading Days Left: ~{schedule['estimated_trading_days_remaining']}")
-            
-            # Update API status
-            api_status = "🟢 Active" if schedule['is_trading_hours'] else "🟡 Paused (Outside hours)"
-            self.api_status_label.setText(f"API Status: {api_status}")
-            
-            # Update error status - check for API errors
-            error_info = self.predictor.get_last_error_info()
-            if error_info:
-                self.error_status_label.setText("❌ API Error Detected")
-                self.error_status_label.setStyleSheet("color: #FF6B6B; font-weight: bold;")
-                self.error_code_label.setText(f"Error Code: {error_info['error_code']}")
-                self.error_description_label.setText(f"Description: {error_info['description']}")
-                self.error_description_label.setStyleSheet("color: #FFB6C1; font-weight: normal;")
-            else:
-                self.error_status_label.setText("✅ No errors detected")
-                self.error_status_label.setStyleSheet("color: #90EE90; font-weight: bold;")
-                self.error_code_label.setText("Error Code: None")
-                self.error_description_label.setText("Description: All systems operational")
-                self.error_description_label.setStyleSheet("color: #87CEEB; font-weight: normal;")
-            
-            # Update raw API responses for all data sources
-            raw_response = self.predictor.get_raw_api_response()
-            self.update_raw_api_sections(raw_response)
-            
-            # Update market factors (DXY and prediction)
-            self.update_market_factors(data)
-            
-            # Update historical price chart
-            if 'historical_data' in data and data['historical_data']:
+            # Update historical price chart and cache historical data (only on full refresh)
+            if data.get('historical_data') and refresh_type == "full":
+                print(f"📈 [{timestamp}] Updating historical chart and technical indicators...")
+                self.cached_historical_data = data['historical_data']  # Cache for technical indicators
                 self.create_price_chart(data['historical_data'])
-            elif 'historical_data' in data:
+                
+                # Update technical indicators dashboard (use cached data)
+                self.update_technical_indicators()
+                
+                # Mark initial load as complete after first successful update
+                if not self.initial_load_complete:
+                    self.initial_load_complete = True
+                    self.last_technical_indicators_refresh = datetime.now()
+                    
+            elif refresh_type == "full" and 'historical_data' in data:
                 self.chart_status_label.setText("📊 No historical data available")
             
-            # Mark initial load as complete after first successful update
-            if not self.initial_load_complete:
-                self.initial_load_complete = True
+            # For price-only refreshes, technical indicators use cached data (no refresh needed)
+            elif refresh_type == "price_only" and hasattr(self, 'cached_historical_data') and self.cached_historical_data:
+                # Technical indicators don't need updating for price-only refresh
+                print(f"💰 [{timestamp}] Price-only refresh - technical indicators using cached data")
             
-            self.status_bar.showMessage(f"✅ Updated successfully at {data['timestamp']}")
+            self.status_bar.showMessage(f"✅ {refresh_type.title()} refresh completed at {data['timestamp']}")
             
         except Exception as e:
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            print(f"❌ [{timestamp}] Display update error: {str(e)}")
             self.handle_error(f"Display update error: {str(e)}")
     
-    def update_products_table(self, products_data):
-        """Update the products table with London market data"""
-        # Handle the new CNBC data structure
-        if isinstance(products_data, dict) and 'list' in products_data:
-            # New CNBC format: {'list': [{'type': '...', 'price': '...', ...}]}
-            product_list = products_data['list']
-            if not product_list:
+    def update_technical_indicators(self):
+        """Update the technical indicators dashboard"""
+        try:
+            # Debug: Check if technical engine exists
+            if not hasattr(self, 'technical_engine') or self.technical_engine is None:
+                self.overall_sentiment_label.setText("Error: Technical engine not initialized")
+                return
+            
+            # Get comprehensive analysis (use cached data if available)
+            analysis_result = self.technical_engine.get_comprehensive_analysis(
+                days=80, 
+                historical_data=self.cached_historical_data
+            )
+            
+            # Handle the result properly
+            if analysis_result is None:
+                self.overall_sentiment_label.setText("Error: Unable to get analysis")
+                return
+            
+            # Check if we got a tuple with data
+            if isinstance(analysis_result, tuple) and len(analysis_result) == 2:
+                table_data, overall_data = analysis_result
+                
+                if table_data is None:
+                    self.overall_sentiment_label.setText(f"Error: {overall_data}")
+                    return
+            else:
+                self.overall_sentiment_label.setText(f"Error: Invalid analysis format (got {type(analysis_result)})")
+                return
+            
+            # Update overall sentiment
+            if not isinstance(overall_data, dict):
+                self.overall_sentiment_label.setText("Error: Invalid overall data format")
                 return
                 
-            self.products_table.setRowCount(len(product_list))
+            sentiment = overall_data.get('sentiment', 'Unknown')
+            icon = overall_data.get('icon', '📊')
+            score = overall_data.get('score', 0.0)
+            current_price = overall_data.get('current_price', 0.0)
             
-            for row, product_info in enumerate(product_list):
-                # Metal code/type
-                metal_item = QTableWidgetItem(product_info.get('type', 'Unknown'))
-                metal_item.setForeground(QColor(255, 255, 255))  # White text
-                self.products_table.setItem(row, 0, metal_item)
+            # Color coding for sentiment
+            sentiment_colors = {
+                "Strong Buy": "#00FF00",    # Bright green
+                "Buy": "#90EE90",           # Light green
+                "Neutral": "#FFD700",       # Gold
+                "Sell": "#FFA500",          # Orange
+                "Strong Sell": "#FF4444"    # Red
+            }
+            
+            sentiment_color = sentiment_colors.get(sentiment, "#FFD700")
+            
+            self.overall_sentiment_label.setText(f"{icon} {sentiment}")
+            self.overall_sentiment_label.setStyleSheet(f"""
+                font-size: 18px; 
+                font-weight: bold; 
+                color: {sentiment_color}; 
+                background-color: #2b2b2b; 
+                padding: 10px; 
+                border: 2px solid #555; 
+                border-radius: 5px;
+                text-align: center;
+            """)
+            
+            self.sentiment_score_label.setText(f"Score: {score:+.2f}")
+            
+            # Update indicators table
+            self.indicators_table.setRowCount(len(table_data))
+            
+            for row, indicator_info in enumerate(table_data):
+                # Indicator name
+                indicator_item = QTableWidgetItem(indicator_info['indicator'])
+                indicator_item.setForeground(QColor(255, 255, 255))
+                self.indicators_table.setItem(row, 0, indicator_item)
                 
-                # Name (use type as name for CNBC data)
-                name_item = QTableWidgetItem(product_info.get('type', 'Unknown'))
-                name_item.setForeground(QColor(255, 255, 255))  # White text
-                self.products_table.setItem(row, 1, name_item)
+                # Value
+                value_item = QTableWidgetItem(indicator_info['value'])
+                value_item.setForeground(QColor(255, 215, 0))  # Gold color
+                self.indicators_table.setItem(row, 1, value_item)
                 
-                # USD Price with golden color
-                price = product_info.get('price', '0')
-                price_item = QTableWidgetItem(f"${price}")
-                price_item.setForeground(QColor(255, 215, 0))  # Gold color
-                self.products_table.setItem(row, 2, price_item)
+                # Signal icon
+                signal_item = QTableWidgetItem(indicator_info['icon'])
+                self.indicators_table.setItem(row, 2, signal_item)
                 
-                # Change percentage with color coding
-                change_percent = product_info.get('change_percent', '0%')
-                change_item = QTableWidgetItem(change_percent)
-                if '+' in change_percent:
-                    # Red for positive (following user's color scheme preference)
-                    change_item.setForeground(QColor(255, 100, 100))  # Light red text
-                    change_item.setBackground(QColor(80, 0, 0, 80))  # Dark red background
-                elif '-' in change_percent:
-                    # Green for negative (following user's color scheme preference)
-                    change_item.setForeground(QColor(0, 255, 0))  # Bright green text
-                    change_item.setBackground(QColor(0, 80, 0, 80))  # Dark green background
+                # Category with color coding
+                category = indicator_info['category']
+                category_item = QTableWidgetItem(category)
+                # Convert hex color to QColor for setForeground
+                if category == "Strong Buy":
+                    category_item.setForeground(QColor(0, 255, 0))
+                elif category == "Buy":
+                    category_item.setForeground(QColor(144, 238, 144))
+                elif category == "Neutral":
+                    category_item.setForeground(QColor(255, 215, 0))
+                elif category == "Sell":
+                    category_item.setForeground(QColor(255, 165, 0))
+                elif category == "Strong Sell":
+                    category_item.setForeground(QColor(255, 68, 68))
                 else:
-                    change_item.setForeground(QColor(200, 200, 200))  # Light gray for neutral
+                    category_item.setForeground(QColor(255, 215, 0))
+                self.indicators_table.setItem(row, 3, category_item)
                 
-                self.products_table.setItem(row, 3, change_item)
-                
-        elif isinstance(products_data, dict):
-            # Old format: dictionary with product codes as keys
-            self.products_table.setRowCount(len(products_data))
+                # Details/Extra info
+                extra_info = indicator_info.get('extra', '')
+                details_item = QTableWidgetItem(extra_info)
+                details_item.setForeground(QColor(135, 206, 235))  # Sky blue
+                self.indicators_table.setItem(row, 4, details_item)
             
-            row = 0
-            for product_code, product_info in products_data.items():
-                # Metal code with proper styling
-                metal_item = QTableWidgetItem(product_code)
-                metal_item.setForeground(QColor(255, 255, 255))  # White text
-                self.products_table.setItem(row, 0, metal_item)
-                
-                # English name
-                name_item = QTableWidgetItem(product_info['name'])
-                name_item.setForeground(QColor(255, 255, 255))  # White text
-                self.products_table.setItem(row, 1, name_item)
-                
-                # USD Price with golden color
-                price_item = QTableWidgetItem(f"${product_info['usd_price']}")
-                price_item.setForeground(QColor(255, 215, 0))  # Gold color
-                self.products_table.setItem(row, 2, price_item)
-                
-                # Color code the change percentage
-                change_item = QTableWidgetItem(product_info['change_percent'])
-                if '+' in product_info['change_percent']:
-                    # Red for positive (following user's color scheme preference)
-                    change_item.setForeground(QColor(255, 100, 100))  # Light red text
-                    change_item.setBackground(QColor(80, 0, 0, 80))  # Dark red background
-                elif '-' in product_info['change_percent']:
-                    # Green for negative (following user's color scheme preference)
-                    change_item.setForeground(QColor(0, 255, 0))  # Bright green text
-                    change_item.setBackground(QColor(0, 80, 0, 80))  # Dark green background
-                else:
-                    change_item.setForeground(QColor(200, 200, 200))  # Light gray for neutral
-                
-                self.products_table.setItem(row, 3, change_item)
-                row += 1
-        else:
-            return
+            # Resize columns to content
+            self.indicators_table.resizeColumnsToContents()
             
-            # Daily range with cyan color
-            daily_range = f"${product_info['low_price']} - ${product_info['high_price']}"
-            range_item = QTableWidgetItem(daily_range)
-            range_item.setForeground(QColor(135, 206, 235))  # Sky blue
-            self.products_table.setItem(row, 4, range_item)
-            
-            # Previous close
-            close_item = QTableWidgetItem(f"${product_info['previous_close']}")
-            close_item.setForeground(QColor(255, 255, 255))  # White text
-            self.products_table.setItem(row, 5, close_item)
-            
-            # Update time with light gray
-            time_item = QTableWidgetItem(product_info['update_time'])
-            time_item.setForeground(QColor(200, 200, 200))  # Light gray
-            self.products_table.setItem(row, 6, time_item)
-            
-            row += 1
+        except Exception as e:
+            error_msg = f"Technical indicators error: {str(e)}"
+            self.overall_sentiment_label.setText(error_msg)
+            print(f"❌ {error_msg}")
+            # Also print the full traceback for debugging
+            import traceback
+            traceback.print_exc()
+    
+    def refresh_technical_indicators(self):
+        """Manual refresh of technical indicators"""
+        self.overall_sentiment_label.setText("🔄 Refreshing analysis...")
+        self.sentiment_score_label.setText("Score: --")
         
-        # Adjust column widths
-        self.products_table.resizeColumnsToContents()
+        # Force refresh with new data
+        try:
+            # Clear cache for fresh data
+            self.technical_engine = TechnicalIndicatorsEngine()
+            self.update_technical_indicators()
+        except Exception as e:
+            self.overall_sentiment_label.setText(f"Refresh Error: {str(e)}")
+            print(f"❌ Manual refresh error: {e}")
     
     def update_market_factors(self, data):
         """Update all market factors display with individual sections"""
